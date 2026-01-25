@@ -1,0 +1,16 @@
+{
+  "name": "asgr-agent-skills",
+  "version": "1.0.0",
+  "description": "ASGR Base Agent Skills Collection - Japanese law, tax, and business workflow skills",
+  "author": "asgr-base",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/asgr-base/agent-skills",
+  "skills": ["skills/*"],
+  "tags": [
+    "japanese",
+    "law",
+    "tax",
+    "business",
+    "e-gov"
+  ]
+}
