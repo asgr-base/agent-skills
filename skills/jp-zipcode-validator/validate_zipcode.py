@@ -286,8 +286,8 @@ def validate_csv(input_csv: str, output_csv: str = None):
 
 
 if __name__ == '__main__':
-    # 検証実行
+    # 検証実行（CSVファイル名は適宜変更してください）
     results = validate_csv(
-        '2026年ラグジュアリーコンサート案内名簿.csv',
+        '住所一覧.csv',
         '検証結果_郵便番号.csv'
     )
