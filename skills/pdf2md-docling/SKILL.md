@@ -50,7 +50,7 @@ Doclingは深いディレクトリ構造を作成するため、以下のよう�
 ```
 変換前（Docling出力）:
 output_directory/
-└── Users/togo/.../filename_artifacts/
+└── Users/USERNAME/.../filename_artifacts/
     └── image_*.png
 
 変換後（整理済み）:
