@@ -2,6 +2,17 @@
 
 All notable changes to the PDF to Markdown converter (Docling edition) are documented in this file.
 
+## [3.20.0] - 2026-01-26
+
+### Improved
+- Doclingパス確認手順を「Step 0」として追加
+- 環境依存のパス問題を解決（macOS Python、pipx、venv等に対応）
+- Quick Referenceから固定パス表記を削除し、動的確認手順に変更
+
+### Added
+- 一般的なDoclingインストール場所のリストを追加
+- パス確認用のワンライナーコマンドを追加
+
 ## [3.18.0] - 2026-01-14
 
 ### Fixed

@@ -1,10 +1,10 @@
 ---
 name: pdf2md-docling
 description: Convert PDF files to Markdown using Docling with TableFormer for high-accuracy table extraction. Exports images as separate PNG files. Handles complex documents with APDU tables, cryptographic protocols, MRZ examples, ASN.1 syntax. Use when converting technical specifications, passport standards (ICAO Doc 9303), smart card documentation, or documents requiring precise table structure preservation. Includes 12-step post-processing pipeline for production-grade output.
-version: 3.19.0
+version: 3.20.0
 author: claude_code
 createDate: 2025-12-27
-updateDate: 2026-01-14
+updateDate: 2026-01-26
 ---
 
 # PDF to Markdown Converter (Docling Edition)
@@ -24,9 +24,27 @@ PDFファイルをDoclingでMarkdownに変換。TableFormerによる高精度テ
 | 変換速度 | ~1秒/ページ（50ページで約50秒） |
 | 出力形式 | Markdown + 外部PNG画像 |
 | テーブル | TableFormer（高精度） |
-| Doclingパス | `docling` |
 
 ## 変換手順
+
+### Step 0: Doclingパス確認
+
+Doclingのインストール場所は環境により異なるため、最初にパスを確認：
+
+```bash
+# パス確認（いずれかでヒット）
+which docling 2>/dev/null || \
+  find ~/Library/Python -name docling 2>/dev/null | head -1 || \
+  pip show docling 2>/dev/null | grep Location
+```
+
+**一般的なインストール場所:**
+- グローバル: `docling`（PATHに含まれる場合）
+- macOS Python: `~/Library/Python/3.x/bin/docling`
+- pipx: `~/.local/bin/docling`
+- venv: `.venv/bin/docling`
+
+以降のコマンドでは、確認したパスを使用してください。
 
 ### Step 1: Docling実行
 
@@ -148,4 +166,4 @@ assets/{basename}_docling/     # 画像ディレクトリ
 | [CHANGELOG.md](CHANGELOG.md) | 全バージョン変更履歴 |
 
 ---
-**Version**: 3.19.0 | **Updated**: 2026-01-14
+**Version**: 3.20.0 | **Updated**: 2026-01-26
