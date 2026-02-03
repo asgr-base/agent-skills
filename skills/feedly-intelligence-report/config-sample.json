@@ -1,0 +1,46 @@
+{
+  "token_file": "~/.feedly/token",
+  "output_dir": "Daily",
+  "fetch_count": 100,
+  "time_range_hours": 24,
+
+  "scoring": {
+    "weights": {
+      "engagement": 0.30,
+      "relevance": 0.40,
+      "freshness": 0.20,
+      "source_trust": 0.10
+    },
+    "thresholds": {
+      "must_read": 80,
+      "should_read": 60,
+      "optional": 40
+    }
+  },
+
+  "categories": [
+    {
+      "name": "CHANGE_ME: Category Name",
+      "slug": "change-me",
+      "stream_id": "user/YOUR_USER_ID/category/YOUR_CATEGORY",
+      "keywords": ["keyword1", "keyword2", "keyword3"],
+      "trusted_sources": {
+        "example.com": 80,
+        "another-source.com": 70
+      }
+    }
+  ],
+
+  "deduplication": {
+    "title_similarity_threshold": 0.7,
+    "content_similarity_threshold": 0.8,
+    "time_window_hours": 48
+  },
+
+  "report": {
+    "max_articles_per_category": 20,
+    "include_summary": true,
+    "include_related": true,
+    "language": "ja"
+  }
+}
