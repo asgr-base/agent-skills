@@ -7,6 +7,7 @@
 ```
 ~/.feedly/
 ├── token          # APIトークン（必須）
+├── browser_data/  # ブラウザデータ（トークン自動取得用）
 └── config.json    # 設定ファイル（必須）
 ```
 
@@ -17,9 +18,16 @@
 ```json
 {
   "token_file": "~/.feedly/token",
-  "output_dir": "Project/FeedlyReports",
-  "fetch_count": 100,
-  "time_range_hours": 24,
+  "output_dir": "Daily",
+  "fetch_count": 1000,
+  "time_range_hours": null,
+  "unread_only": true,
+
+  "global_keywords": ["AI", "eKYC", "本人確認"],
+
+  "synonym_groups": [
+    ["AI", "人工知能", "機械学習", "LLM"]
+  ],
 
   "scoring": {
     "weights": {
@@ -29,20 +37,23 @@
       "source_trust": 0.10
     },
     "thresholds": {
-      "must_read": 80,
-      "should_read": 60,
-      "optional": 40
+      "must_read": 55,
+      "should_read": 45,
+      "optional": 35
     }
+  },
+
+  "trusted_sources": {
+    "example.com": 1.0
   },
 
   "categories": [
     {
-      "name": "カテゴリ表示名",
+      "name": "Feedlyのカテゴリ名",
       "slug": "category-slug",
-      "stream_id": "user/YOUR_USER_ID/category/CategoryName",
-      "keywords": ["keyword1", "keyword2"],
+      "keywords": ["カテゴリ固有キーワード"],
       "trusted_sources": {
-        "example.com": 80
+        "category-specific.com": 1.0
       }
     }
   ],
@@ -70,8 +81,17 @@
 |-----------|-----|------|------|
 | `token_file` | string | Yes | トークンファイルパス |
 | `output_dir` | string | Yes | レポート出力先（プロジェクトルートからの相対パス） |
-| `fetch_count` | int | No | カテゴリあたりの取得記事数（デフォルト: 100） |
-| `time_range_hours` | int | No | 取得対象期間（デフォルト: 24時間） |
+| `fetch_count` | int | No | 取得記事数上限（デフォルト: 1000） |
+| `time_range_hours` | int/null | No | 取得対象期間（null=無制限、デフォルト: null） |
+| `unread_only` | bool | No | 未読記事のみ取得（デフォルト: true） |
+
+### global_keywords
+
+全カテゴリ共通の関連度判定用キーワード。記事タイトル・本文にこれらのキーワードが含まれると関連度スコアが上がる。
+
+### synonym_groups
+
+同義語グループ。同一グループ内のキーワードは同等に扱われる。例えば「AI」と「人工知能」は同じトピックとして判定。
 
 ### scoring
 
@@ -85,15 +105,22 @@
 | `thresholds.should_read` | SHOULD READの閾値（0-100） |
 | `thresholds.optional` | OPTIONALの閾値（0-100） |
 
+### trusted_sources
+
+グローバルなソース信頼度設定。ドメイン名をキー、信頼度（0-1）を値として設定。
+
 ### categories[]
+
+カテゴリ別の設定。**`stream_id`は不要**（global.allから自動取得）。
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `name` | string | Yes | 表示名 |
+| `name` | string | Yes | **Feedly側のカテゴリ名と完全一致** |
 | `slug` | string | Yes | ファイル名用識別子（英数字・ハイフン） |
-| `stream_id` | string | Yes | Feedly Stream ID |
-| `keywords` | string[] | Yes | 関連度判定用キーワード |
-| `trusted_sources` | object | No | ソース別信頼度（0-100） |
+| `keywords` | string[] | No | カテゴリ固有の関連度判定用キーワード |
+| `trusted_sources` | object | No | カテゴリ固有のソース信頼度（0-1） |
+
+**重要**: `name`はFeedlyで設定したカテゴリ名と完全に一致させる必要があります。一致しない場合、Feedlyのカテゴリ名がそのままslugとして使用されます。
 
 ### deduplication
 
@@ -103,21 +130,14 @@
 | `content_similarity_threshold` | 本文類似度の閾値（0-1） |
 | `time_window_hours` | 重複検出の時間窓 |
 
-## Stream IDの取得方法
+## カテゴリ名の確認方法
 
-1. https://feedly.com にログイン
-2. 対象カテゴリをクリック
-3. URLから取得:
-   ```
-   https://feedly.com/i/category/user/xxxx-xxxx-xxxx/category/MyCategory
-                                   └─────────────── Stream ID ───────────────┘
-   ```
+Feedlyで設定したカテゴリ名を確認するには:
 
-4. または API で取得:
-   ```bash
-   curl -H "Authorization: Bearer $(cat ~/.feedly/token)" \
-        "https://api.feedly.com/v3/categories" | jq '.[].id'
-   ```
+```bash
+curl -s -H "Authorization: Bearer $(cat ~/.feedly/token)" \
+     "https://api.feedly.com/v3/categories" | jq '.[].label'
+```
 
 ## 設定例のパターン
 
@@ -141,6 +161,13 @@
   "freshness": 0.30,
   "source_trust": 0.10
 }
+```
+
+### 未読管理なし（全記事取得）
+
+```json
+"unread_only": false,
+"time_range_hours": 24
 ```
 
 ---

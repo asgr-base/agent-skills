@@ -1,39 +1,68 @@
 # セットアップガイド
 
-## 1. Feedly Developer Access Token 取得
+## 1. Feedly Access Token 取得
 
-### 手順
+トークン取得には2つの方法があります。
 
-1. **Feedlyにログイン**
-   - https://feedly.com にアクセス
-   - 既存アカウントでログイン（または新規作成）
+### 方法A: 自動取得スクリプト（推奨）
 
-2. **Developer Token取得ページへ移動**
-   - https://feedly.com/v3/auth/dev にアクセス
-   - 「Generate Token」をクリック
-
-3. **トークンをコピー**
-   - 表示されたトークンをコピー
-   - **重要**: このトークンは一度しか表示されない
-
-### トークンの保存
+Playwrightを使ってブラウザからトークンを自動取得します。
 
 ```bash
-# 設定ディレクトリを作成
-mkdir -p ~/.feedly
+# Chromiumインストール（初回のみ）
+uv run --with playwright python -m playwright install chromium
 
-# トークンを保存
-echo 'YOUR_ACCESS_TOKEN_HERE' > ~/.feedly/token
+# トークン取得
+uv run --with playwright --with requests python scripts/feedly_token_refresh.py
+```
+
+ブラウザが開き、Feedlyにアクセスします：
+- **ログイン済み**: 自動的にトークンを取得
+- **未ログイン**: ログイン画面が表示されるので手動でログイン
+
+トークンは `~/.feedly/token` に保存されます。
+
+**オプション**:
+| オプション | 説明 |
+|------------|------|
+| `--check` | 現在のトークンの有効性を確認 |
+| `--force` | 既存トークンが有効でも強制更新 |
+| `--output PATH` | 出力先を指定 |
+
+### 方法B: 手動取得（ブラウザコンソール）
+
+1. https://feedly.com にログイン
+2. 開発者ツールを開く（F12）
+3. Consoleタブで以下を実行:
+
+```javascript
+JSON.parse(localStorage.getItem('feedly.session')).feedlyToken
+```
+
+4. 表示されたトークンをコピーして保存:
+
+```bash
+mkdir -p ~/.feedly
+echo 'YOUR_TOKEN_HERE' > ~/.feedly/token
 chmod 600 ~/.feedly/token
 ```
 
-### 制限事項
+### 方法C: Developer Token（Pro plan必要）
 
-| 項目 | 内容 |
-|------|------|
-| 有効期限 | 3ヶ月（自動延長なし） |
-| リクエスト上限 | 月間100,000リクエスト |
-| 用途 | 個人利用のみ |
+> ⚠️ 2026年1月以降、Developer Tokenの発行にはPro plan（有料）が必要です。
+
+1. https://feedly.com/v3/auth/dev にアクセス
+2. 「Generate Token」をクリック
+3. トークンをコピーして保存
+
+### トークンの制限事項
+
+| 項目 | Web Access Token | Developer Token |
+|------|------------------|-----------------|
+| 有効期限 | 約1週間 | 3ヶ月 |
+| 取得方法 | ブラウザ/スクリプト | Pro plan必要 |
+| リクエスト上限 | 月間100,000 | 月間100,000 |
+| 用途 | 個人利用のみ | 個人利用のみ |
 
 ## 2. Feedlyカテゴリの準備
 

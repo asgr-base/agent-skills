@@ -579,8 +579,8 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
 
         lines.append(f"## {priority} ({len(group)}件)")
         lines.append("")
-        lines.append("| # | 記事 | スコア | 注目 | Feedly | はてブ | HN | 関連 | 鮮度 | マッチKW | 読了 |")
-        lines.append("|---|------|--------|------|--------|--------|-----|------|------|----------|------|")
+        lines.append("| # | 記事 | スコア | 注目 | Feedly | はてブ | HN | 関連 | 鮮度 | マッチKW | 読了 | 保存 |")
+        lines.append("|---|------|--------|------|--------|--------|-----|------|------|----------|------|------|")
 
         for i, article in enumerate(group, 1):
             title = article.get("title", "No Title")[:50].replace("|", "｜")
@@ -598,13 +598,13 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
                 lines.append(
                     f"| {i} | [{title}]({url}) | **{scores.get('total', 0)}** | "
                     f"{scores.get('engagement', 0)} | {feedly} | {hatena} | {hn} | {scores.get('relevance', 0)} | "
-                    f"{scores.get('freshness', 0)} | {matched_kw} | [ ] |"
+                    f"{scores.get('freshness', 0)} | {matched_kw} | [ ] | [ ] |"
                 )
             else:
                 lines.append(
                     f"| {i} | {title} | **{scores.get('total', 0)}** | "
                     f"{scores.get('engagement', 0)} | {feedly} | {hatena} | {hn} | {scores.get('relevance', 0)} | "
-                    f"{scores.get('freshness', 0)} | {matched_kw} | [ ] |"
+                    f"{scores.get('freshness', 0)} | {matched_kw} | [ ] | [ ] |"
                 )
 
         lines.append("")

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """
-Feedly API から記事を取得するスクリプト
+Feedly API から全未読記事を一括取得するスクリプト
 
 Usage:
-    python feedly_fetch.py --config ~/.feedly/config.json --output /tmp/feedly_articles.json
-    python feedly_fetch.py --test  # APIトークン確認
-    python feedly_fetch.py --mark-read /tmp/feedly_articles.json  # 取得した記事を既読にする
+    # 全未読記事を取得（global.all使用、1 API call）
+    python feedly_fetch.py --output /tmp/feedly_articles.json
+
+    # 既読記事も含めて取得
+    python feedly_fetch.py --include-read --output /tmp/feedly_articles.json
+
+    # APIトークン確認
+    python feedly_fetch.py --test
+
+    # 取得した記事を既読にする
+    python feedly_fetch.py --mark-read /tmp/feedly_articles.json
 """
 
 import argparse
@@ -46,6 +54,14 @@ def load_config(config_file: str) -> dict:
     return json.loads(path.read_text())
 
 
+def get_user_id(token: str) -> str:
+    """ユーザーIDを取得"""
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{FEEDLY_API_BASE}/profile", headers=headers, timeout=10)
+    resp.raise_for_status()
+    return resp.json().get("id", "")
+
+
 def test_connection(token: str) -> bool:
     """API接続テスト"""
     headers = {"Authorization": f"Bearer {token}"}
@@ -67,7 +83,8 @@ def fetch_stream_contents(
     token: str,
     stream_id: str,
     count: int = 100,
-    newer_than: int = None
+    newer_than: int = None,
+    unread_only: bool = True
 ) -> list[dict]:
     """
     指定されたストリームから記事を取得
@@ -77,6 +94,7 @@ def fetch_stream_contents(
         stream_id: Feedly stream ID
         count: 取得する記事数
         newer_than: この時刻（Unix timestamp ms）より新しい記事のみ取得
+        unread_only: Trueの場合、未読記事のみを取得（デフォルト: True）
 
     Returns:
         記事リスト
@@ -85,6 +103,7 @@ def fetch_stream_contents(
     params = {
         "streamId": stream_id,
         "count": min(count, 1000),  # API上限
+        "unreadOnly": "true" if unread_only else "false",
     }
     if newer_than:
         params["newerThan"] = newer_than
@@ -250,57 +269,83 @@ def extract_entry_ids_from_json(json_file: str) -> list[str]:
     return entry_ids
 
 
-def fetch_all_categories(config: dict, token: str) -> dict:
+def fetch_global_all(config: dict, token: str, include_read: bool = False) -> dict:
     """
-    全カテゴリから記事を取得
+    global.allストリームから全記事を一括取得し、カテゴリごとにグループ化
 
     Args:
         config: 設定辞書
         token: API token
+        include_read: Trueの場合、既読記事も含める（デフォルト: False = 未読のみ）
 
     Returns:
         カテゴリ別の記事辞書
     """
-    time_range_hours = config.get("time_range_hours", 24)
-    fetch_count = config.get("fetch_count", 100)
+    fetch_count = config.get("fetch_count", 1000)  # global.allでは多めに
+    unread_only = config.get("unread_only", True)
+    if include_read:
+        unread_only = False
 
-    # 時間範囲の計算（ミリ秒）
-    newer_than = int((datetime.now() - timedelta(hours=time_range_hours)).timestamp() * 1000)
+    # ユーザーIDを取得
+    user_id = get_user_id(token)
+    global_all_id = f"user/{user_id}/category/global.all"
 
+    mode_str = "未読のみ" if unread_only else "全記事（既読含む）"
+    print(f"取得モード: {mode_str} (global.all)", file=sys.stderr)
+    print(f"Fetching all articles...", file=sys.stderr)
+
+    raw_articles = fetch_stream_contents(
+        token=token,
+        stream_id=global_all_id,
+        count=fetch_count,
+        newer_than=None,  # 時間制限なし
+        unread_only=unread_only
+    )
+
+    print(f"  → {len(raw_articles)} articles", file=sys.stderr)
+
+    # カテゴリごとにグループ化
     results = {}
+    config_categories = {cat.get("name"): cat for cat in config.get("categories", [])}
 
-    for category in config.get("categories", []):
-        name = category.get("name", "Unknown")
-        slug = category.get("slug", "unknown")
-        stream_id = category.get("stream_id", "")
+    for article in raw_articles:
+        article_data = extract_article_data(article)
 
-        if not stream_id:
-            print(f"Warning: No stream_id for category '{name}'", file=sys.stderr)
-            continue
+        # 記事のカテゴリ情報を取得
+        categories = article.get("categories", [])
+        if not categories:
+            # カテゴリなしの場合は "uncategorized" に分類
+            cat_label = "uncategorized"
+            cat_slug = "uncategorized"
+        else:
+            # 最初のカテゴリを使用
+            cat_label = categories[0].get("label", "unknown")
+            # 設定ファイルのカテゴリ名からslugを取得
+            if cat_label in config_categories:
+                cat_slug = config_categories[cat_label].get("slug", cat_label.lower())
+            else:
+                cat_slug = cat_label.lower().replace(" ", "-")
 
-        print(f"Fetching: {name} ({slug})...", file=sys.stderr)
+        if cat_slug not in results:
+            # 設定ファイルからキーワード等を取得
+            cat_config = config_categories.get(cat_label, {})
+            results[cat_slug] = {
+                "name": cat_label,
+                "slug": cat_slug,
+                "stream_id": f"user/{user_id}/category/{cat_label}",
+                "keywords": cat_config.get("keywords", []),
+                "trusted_sources": cat_config.get("trusted_sources", {}),
+                "articles": [],
+                "fetched_at": datetime.now().isoformat(),
+                "count": 0,
+            }
 
-        raw_articles = fetch_stream_contents(
-            token=token,
-            stream_id=stream_id,
-            count=fetch_count,
-            newer_than=newer_than
-        )
+        results[cat_slug]["articles"].append(article_data)
+        results[cat_slug]["count"] += 1
 
-        articles = [extract_article_data(a) for a in raw_articles]
-
-        results[slug] = {
-            "name": name,
-            "slug": slug,
-            "stream_id": stream_id,
-            "keywords": category.get("keywords", []),
-            "trusted_sources": category.get("trusted_sources", {}),
-            "articles": articles,
-            "fetched_at": datetime.now().isoformat(),
-            "count": len(articles),
-        }
-
-        print(f"  → {len(articles)} articles", file=sys.stderr)
+    # カテゴリ別の件数を表示
+    for slug, data in sorted(results.items(), key=lambda x: -x[1]["count"]):
+        print(f"  - {data['name']}: {data['count']}件", file=sys.stderr)
 
     return results
 
@@ -331,6 +376,11 @@ def main():
         "--mark-read",
         metavar="JSON_FILE",
         help="Mark all articles in the specified JSON file as read"
+    )
+    parser.add_argument(
+        "--include-read",
+        action="store_true",
+        help="Include already-read articles (default: unread only)"
     )
 
     args = parser.parse_args()
@@ -372,20 +422,30 @@ def main():
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
 
-    # 記事取得
+    # 記事取得（global.allから一括取得）
     config = load_config(args.config)
-    results = fetch_all_categories(config, token)
+    results = fetch_global_all(config, token, include_read=args.include_read)
 
     # メタデータ追加
+    unread_only = config.get("unread_only", True) and not args.include_read
     output = {
         "metadata": {
             "generated_at": datetime.now().isoformat(),
-            "time_range_hours": config.get("time_range_hours", 24),
             "total_articles": sum(cat["count"] for cat in results.values()),
             "categories_count": len(results),
+            "unread_only": unread_only,
         },
         "categories": results,
     }
+
+    # URL → エントリーIDマッピングを生成
+    url_to_entry_id = {}
+    for category in results.values():
+        for article in category.get("articles", []):
+            url = article.get("url", "")
+            entry_id = article.get("id", "")
+            if url and entry_id:
+                url_to_entry_id[url] = entry_id
 
     # 出力
     output_json = json.dumps(output, ensure_ascii=False, indent=2)
@@ -397,6 +457,11 @@ def main():
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(output_json)
         print(f"Output written to: {output_path}", file=sys.stderr)
+
+        # マッピングファイルを出力（同じディレクトリに配置）
+        mapping_path = output_path.parent / "url_to_entry_id.json"
+        mapping_path.write_text(json.dumps(url_to_entry_id, ensure_ascii=False, indent=2))
+        print(f"Mapping file written to: {mapping_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

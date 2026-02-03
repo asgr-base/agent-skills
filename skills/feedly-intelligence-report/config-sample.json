@@ -1,8 +1,19 @@
 {
   "token_file": "~/.feedly/token",
   "output_dir": "Daily",
-  "fetch_count": 100,
-  "time_range_hours": 24,
+  "fetch_count": 1000,
+  "time_range_hours": null,
+  "unread_only": true,
+
+  "global_keywords": [
+    "AI", "LLM", "機械学習",
+    "eKYC", "本人確認", "生体認証"
+  ],
+
+  "synonym_groups": [
+    ["AI", "人工知能", "機械学習", "LLM", "生成AI"],
+    ["eKYC", "本人確認", "KYC", "顔認証"]
+  ],
 
   "scoring": {
     "weights": {
@@ -12,21 +23,24 @@
       "source_trust": 0.10
     },
     "thresholds": {
-      "must_read": 80,
-      "should_read": 60,
-      "optional": 40
+      "must_read": 55,
+      "should_read": 45,
+      "optional": 35
     }
+  },
+
+  "trusted_sources": {
+    "example.com": 1.0,
+    "trusted-news.com": 0.9
   },
 
   "categories": [
     {
-      "name": "CHANGE_ME: Category Name",
-      "slug": "change-me",
-      "stream_id": "user/YOUR_USER_ID/category/YOUR_CATEGORY",
-      "keywords": ["keyword1", "keyword2", "keyword3"],
+      "name": "YOUR_FEEDLY_CATEGORY_NAME",
+      "slug": "your-slug",
+      "keywords": ["category-specific-keyword"],
       "trusted_sources": {
-        "example.com": 80,
-        "another-source.com": 70
+        "category-specific-source.com": 1.0
       }
     }
   ],
