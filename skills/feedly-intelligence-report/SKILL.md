@@ -163,5 +163,5 @@ python scripts/feedly_fetch.py --mark-read /tmp/feedly_articles.json
 
 ---
 
-**Version**: 1.2.0
+**Version**: 1.3.0
 **Last Updated**: 2026-02-03
