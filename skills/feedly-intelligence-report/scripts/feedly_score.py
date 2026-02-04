@@ -110,6 +110,42 @@ def extract_url(article: dict) -> str:
     return article.get("originId", "")
 
 
+def extract_domain(url: str) -> str:
+    """URLからドメインを抽出"""
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return parsed.netloc.lower()
+    except Exception:
+        return ""
+
+
+def is_paywalled(article: dict, paywalled_domains: list) -> bool:
+    """記事がペイウォール付きかどうかを判定"""
+    if not paywalled_domains:
+        return False
+    url = extract_url(article)
+    domain = extract_domain(url)
+    for pd in paywalled_domains:
+        if pd.lower() in domain:
+            return True
+    return False
+
+
+def hatena_entry_url(url: str) -> str:
+    """はてなブックマークのエントリーページURLを生成"""
+    if not url:
+        return ""
+    # https:// を除去して s/ プレフィックスを付ける
+    if url.startswith("https://"):
+        return f"https://b.hatena.ne.jp/entry/s/{url[8:]}"
+    elif url.startswith("http://"):
+        return f"https://b.hatena.ne.jp/entry/{url[7:]}"
+    return ""
+
+
 def normalize_title(title: str) -> str:
     """タイトルを正規化（重複検出用）"""
     for sep in [" | ", " - ", " -- ", "｜", "：", " :: "]:
@@ -144,18 +180,18 @@ def fetch_hatena_bookmark_count(url: str) -> int:
     return 0
 
 
-def fetch_hn_points(url: str) -> int:
+def fetch_hn_points(url: str) -> tuple[int, str]:
     """
-    Hacker News のポイント数を取得
+    Hacker News のポイント数とobjectIDを取得
 
     Args:
         url: 記事URL
 
     Returns:
-        ポイント数（エラー時は0）
+        (ポイント数, objectID) のタプル（エラー時は (0, "")）
     """
     if not requests:
-        return 0
+        return 0, ""
     try:
         api_url = f"https://hn.algolia.com/api/v1/search?query={quote(url, safe='')}&restrictSearchableAttributes=url&hitsPerPage=1"
         resp = requests.get(api_url, timeout=5)
@@ -163,10 +199,19 @@ def fetch_hn_points(url: str) -> int:
             data = resp.json()
             hits = data.get("hits", [])
             if hits:
-                return hits[0].get("points", 0) or 0
+                points = hits[0].get("points", 0) or 0
+                object_id = hits[0].get("objectID", "") or ""
+                return points, object_id
     except Exception:
         pass
-    return 0
+    return 0, ""
+
+
+def hn_entry_url(object_id: str) -> str:
+    """Hacker NewsのエントリーページURLを生成"""
+    if not object_id:
+        return ""
+    return f"https://news.ycombinator.com/item?id={object_id}"
 
 
 def fetch_social_metrics_for_articles(articles: list, max_workers: int = 10) -> dict:
@@ -193,8 +238,8 @@ def fetch_social_metrics_for_articles(articles: list, max_workers: int = 10) -> 
 
     def fetch_metrics(url: str) -> tuple:
         hatena = fetch_hatena_bookmark_count(url)
-        hn = fetch_hn_points(url)
-        return url, {"hatena": hatena, "hn": hn}
+        hn_points, hn_id = fetch_hn_points(url)
+        return url, {"hatena": hatena, "hn": hn_points, "hn_id": hn_id}
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch_metrics, url): url for url in urls}
@@ -239,6 +284,7 @@ def calculate_engagement_score(article: dict, social_metrics: dict = None) -> tu
     metrics = (social_metrics or {}).get(url, {})
     hatena_count = metrics.get("hatena", 0)
     hn_points = metrics.get("hn", 0)
+    hn_id = metrics.get("hn_id", "")
 
     hatena_score = min(hatena_count * 2, 40)  # 20ブクマで40点
     hn_score = min(hn_points * 0.5, 40)  # 80ポイントで40点
@@ -248,7 +294,8 @@ def calculate_engagement_score(article: dict, social_metrics: dict = None) -> tu
     breakdown = {
         "feedly": round(feedly_score, 1),
         "hatena": hatena_count,
-        "hn": hn_points
+        "hn": hn_points,
+        "hn_id": hn_id
     }
 
     return total, breakdown
@@ -557,20 +604,51 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
     lines.append("")
     lines.append("## スコアリング基準")
     lines.append("")
-    lines.append("| 指標 | 重み | 説明 |")
-    lines.append("|------|------|------|")
-    lines.append("| 注目度 | 30% | Feedly engagement + はてブ数 + HN points |")
-    lines.append("| 関連度 | 40% | キーワードマッチ（個人の関心度） |")
-    lines.append("| 鮮度 | 20% | 公開からの経過時間 |")
-    lines.append("| 信頼度 | 10% | ソースの信頼性 |")
+    lines.append("### 総合スコア")
+    lines.append("")
+    lines.append("```")
+    lines.append("総合スコア = 注目度×30% + 関連度×40% + 鮮度×20% + 信頼度×10%")
+    lines.append("```")
     lines.append("")
     lines.append(f"**ライン引き**: MUST READ≧{thresholds['must_read']} / SHOULD READ≧{thresholds['should_read']} / OPTIONAL≧{thresholds['optional']}")
+    lines.append("")
+    lines.append("### 注目度 (0-100)")
+    lines.append("")
+    lines.append("| 指標 | 計算式 | 上限 |")
+    lines.append("|------|--------|------|")
+    lines.append("| Feedly | engagementRate × 5 | 50点 |")
+    lines.append("| はてブ | ブックマーク数 × 2 | 40点 |")
+    lines.append("| HN | points × 0.5 | 40点 |")
+    lines.append("")
+    lines.append("```")
+    lines.append("注目度 = min(Feedly + はてブ + HN, 100)")
+    lines.append("```")
+    lines.append("")
+    lines.append("### 関連度 (0-100)")
+    lines.append("")
+    lines.append("- キーワードマッチで計算（タイトルマッチは2倍の重み）")
+    lines.append("- 1つ以上マッチ: 基礎点30 + マッチ率に応じて最大70点追加")
+    lines.append("- マッチなし: 0点")
+    lines.append("")
+    lines.append("### 鮮度 (0-100)")
+    lines.append("")
+    lines.append("| 経過時間 | スコア |")
+    lines.append("|----------|--------|")
+    lines.append("| 24時間以内 | 100 |")
+    lines.append("| 48時間以内 | 50 |")
+    lines.append("| 72時間以内 | 35 |")
+    lines.append("| それ以上 | 25 |")
+    lines.append("")
+    lines.append("### 信頼度 (0-100)")
+    lines.append("")
+    lines.append("- 設定ファイルで定義されたソース: 定義値 × 100")
+    lines.append("- 未定義のソース: 50")
     lines.append("")
     lines.append("---")
     lines.append("")
 
     # 各優先度グループを出力
-    priority_order = ["MUST READ", "SHOULD READ", "OPTIONAL", "SKIP"]
+    priority_order = ["MUST READ", "SHOULD READ", "OPTIONAL", "SKIP", "PAYWALLED"]
 
     for priority in priority_order:
         group = priority_groups.get(priority, [])
@@ -590,20 +668,35 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
             feedly = breakdown.get("feedly", 0)
             hatena = breakdown.get("hatena", 0)
             hn = breakdown.get("hn", 0)
+            hn_id = breakdown.get("hn_id", "")
             matched_kw = ", ".join(scores.get("matched_keywords", [])[:3])  # 最大3つ
             if matched_kw:
                 matched_kw = matched_kw.replace("|", "｜")
 
+            # はてブ数にリンクを付ける（1件以上の場合のみ）
+            if hatena > 0 and url:
+                hatena_url = hatena_entry_url(url)
+                hatena_display = f"[{hatena}]({hatena_url})"
+            else:
+                hatena_display = str(hatena)
+
+            # HNポイントにリンクを付ける（1件以上かつIDがある場合のみ）
+            if hn > 0 and hn_id:
+                hn_url = hn_entry_url(hn_id)
+                hn_display = f"[{hn}]({hn_url})"
+            else:
+                hn_display = str(hn)
+
             if url:
                 lines.append(
                     f"| {i} | [{title}]({url}) | **{scores.get('total', 0)}** | "
-                    f"{scores.get('engagement', 0)} | {feedly} | {hatena} | {hn} | {scores.get('relevance', 0)} | "
+                    f"{scores.get('engagement', 0)} | {feedly} | {hatena_display} | {hn_display} | {scores.get('relevance', 0)} | "
                     f"{scores.get('freshness', 0)} | {matched_kw} | [ ] | [ ] |"
                 )
             else:
                 lines.append(
                     f"| {i} | {title} | **{scores.get('total', 0)}** | "
-                    f"{scores.get('engagement', 0)} | {feedly} | {hatena} | {hn} | {scores.get('relevance', 0)} | "
+                    f"{scores.get('engagement', 0)} | {feedly} | {hatena_display} | {hn_display} | {scores.get('relevance', 0)} | "
                     f"{scores.get('freshness', 0)} | {matched_kw} | [ ] | [ ] |"
                 )
 
@@ -685,6 +778,7 @@ def main():
         "should_read": 60,
         "optional": 40
     })
+    paywalled_domains = config.get("paywalled_domains", [])
 
     for article in articles:
         cat_slug = article.get("_category_slug", "")
@@ -692,7 +786,12 @@ def main():
 
         scores = calculate_total_score(article, config, cat_config, social_metrics)
         article["_scores"] = scores
-        article["_priority"] = categorize_priority(scores["total"], thresholds)
+
+        # ペイウォール付きドメインの判定
+        if is_paywalled(article, paywalled_domains):
+            article["_priority"] = "PAYWALLED"
+        else:
+            article["_priority"] = categorize_priority(scores["total"], thresholds)
 
     # 重複除去
     articles = deduplicate_articles(articles)

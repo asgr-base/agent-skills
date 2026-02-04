@@ -34,6 +34,11 @@
     "trusted-news.com": 0.9
   },
 
+  "paywalled_domains": [
+    "bunshun.jp",
+    "nikkei.com"
+  ],
+
   "categories": [
     {
       "name": "YOUR_FEEDLY_CATEGORY_NAME",

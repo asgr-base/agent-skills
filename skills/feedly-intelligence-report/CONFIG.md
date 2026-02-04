@@ -47,6 +47,11 @@
     "example.com": 1.0
   },
 
+  "paywalled_domains": [
+    "bunshun.jp",
+    "nikkei.com"
+  ],
+
   "categories": [
     {
       "name": "Feedlyのカテゴリ名",
@@ -108,6 +113,17 @@
 ### trusted_sources
 
 グローバルなソース信頼度設定。ドメイン名をキー、信頼度（0-1）を値として設定。
+
+### paywalled_domains
+
+有料記事（ペイウォール付き）のドメインリスト。該当ドメインの記事はスコアに関係なく「PAYWALLED」カテゴリに分類される。
+
+```json
+"paywalled_domains": [
+  "bunshun.jp",
+  "nikkei.com"
+]
+```
 
 ### categories[]
 
@@ -172,4 +188,4 @@ curl -s -H "Authorization: Bearer $(cat ~/.feedly/token)" \
 
 ---
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-02-04
