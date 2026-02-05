@@ -17,3 +17,7 @@ Thumbs.db
 .env.*
 credentials.json
 secrets.json
+
+# claude-mem auto-generated files
+**/CLAUDE.md
+**/.claude-mem/
