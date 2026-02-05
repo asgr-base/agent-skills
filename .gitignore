@@ -17,7 +17,3 @@ Thumbs.db
 .env.*
 credentials.json
 secrets.json
-
-# claude-mem auto-generated files (subdirectories only, keep root CLAUDE.md)
-skills/**/CLAUDE.md
-**/.claude-mem/

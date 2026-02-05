@@ -34,6 +34,17 @@ cp -r agent-skills/skills/jp-law-verification ~/.claude/skills/
 | スキル名 | 説明 | 依存関係 |
 |---------|------|---------|
 | [jp-law-verification](skills/jp-law-verification/) | e-Gov法令APIで日本の法令を検索・確認 | e-gov-law MCP |
+| [claude-mem-guide](skills/claude-mem-guide/) | claude-memプラグインのセットアップ・トラブルシューティング | claude-mem plugin |
+
+### 使用例
+
+**jp-law-verification**:
+- 「所得税法第183条を確認して」
+- 「源泉徴収のタイミングについて法的根拠を教えて」
+
+**claude-mem-guide**:
+- 「claude-memが動作しない」
+- 「hookの設定方法を教えて」
 
 ## ディレクトリ構成
 
@@ -42,11 +53,12 @@ agent-skills/
 ├── .claude-plugin/
 │   └── manifest.json      # Claude Code プラグイン設定
 ├── skills/
-│   └── jp-law-verification/
+│   ├── jp-law-verification/
+│   │   ├── SKILL.md       # スキル定義
+│   │   └── README.md      # 詳細ドキュメント
+│   └── claude-mem-guide/
 │       ├── SKILL.md       # スキル定義
-│       ├── README.md      # 詳細ドキュメント
-│       └── ...
-├── CLAUDE.md              # Claude用説明
+│       └── README.md      # 詳細ドキュメント
 ├── CONTRIBUTING.md        # 貢献ガイドライン
 ├── LICENSE
 └── README.md
