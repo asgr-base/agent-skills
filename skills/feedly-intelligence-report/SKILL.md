@@ -19,6 +19,26 @@ Feedlyの記事を分析し、カテゴリ別のインテリジェンスレポ�
 | 記事を既読にする | `uv run --with requests python scripts/feedly_fetch.py --mark-read /tmp/feedly_articles.json` |
 | Read Laterに保存 | `uv run --with requests python scripts/feedly_bookmark.py --report <report.md> --mapping /tmp/url_to_entry_id.json` |
 
+## 自動レポート生成チェックリスト
+
+Claude Codeがレポート生成時に必ず実行するステップ:
+
+1. **ページネーションで全件取得**
+   - `continuation`トークンを使用して結果がなくなるまで継続
+   - 途中で止めない（250件制限に注意）
+
+2. **誤検出除外でキーワードスコアリング**
+   - 除外キーワード: `aim`, `zaim` など（部分一致で除外）
+   - タイトルマッチは本文マッチの2倍の重み
+
+3. **カテゴリとサマリー付きMarkdownレポート生成**
+   - MUST READ / SHOULD READ / OPTIONAL / SKIP に分類
+   - 各記事にスコア内訳を表示
+
+4. **完了前の件数検証**
+   - 「Feedlyの未読件数」と「取得した記事数」が一致することを確認
+   - 不一致の場合は取得を継続し、一致するまでレポート生成しない
+
 ## 前提条件
 
 1. **Feedly Developer Access Token**: [SETUP.md](SETUP.md)参照
@@ -35,6 +55,12 @@ python scripts/feedly_fetch.py --config ~/.feedly/config.json --output /tmp/feed
 ```
 
 **出力**: JSON形式の記事リスト（engagement, engagementRate含む）
+
+**IMPORTANT: ページネーション**
+- Feedly APIはデフォルトで最大250件/リクエスト
+- 未読記事が250件を超える場合、`continuation`トークンを使用して全件取得すること
+- レポート生成前に「期待される記事数」と「取得した記事数」が一致することを確認
+- 一致しない場合は取得を継続
 
 ### 2. 記事分析
 
@@ -267,5 +293,5 @@ python scripts/feedly_fetch.py --mark-read /tmp/feedly_articles.json
 
 ---
 
-**Version**: 1.9.0
-**Last Updated**: 2026-02-04
+**Version**: 1.9.1
+**Last Updated**: 2026-02-05
