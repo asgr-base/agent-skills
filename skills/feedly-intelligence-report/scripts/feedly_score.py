@@ -385,15 +385,33 @@ def calculate_relevance_score(
 
         英語キーワード: 単語境界(\b)でマッチ（ml が html にマッチしない）
         日本語キーワード: そのまま部分一致（単語境界の概念がない）
+        短い英字（ai, ml等）: 日本語テキスト内では英字単語として独立している場合のみマッチ
         """
-        # 日本語を含むかチェック
-        has_japanese = any('\u3040' <= c <= '\u9fff' for c in keyword)
+        # キーワードが日本語を含むかチェック
+        keyword_has_japanese = any('\u3040' <= c <= '\u9fff' for c in keyword)
 
-        if has_japanese:
-            # 日本語は部分一致
+        if keyword_has_japanese:
+            # 日本語キーワードは部分一致
             return keyword in text
         else:
-            # 英語は単語境界でマッチ
+            # 英字キーワード
+            # テキストに日本語（ひらがな・カタカナ・漢字）が含まれるかチェック
+            text_has_japanese = any(
+                '\u3040' <= c <= '\u309f' or  # ひらがな
+                '\u30a0' <= c <= '\u30ff' or  # カタカナ
+                '\u4e00' <= c <= '\u9fff'     # 漢字
+                for c in text
+            )
+
+            # 短い英字キーワード（ai, ml, it等）かつ日本語テキストの場合
+            # 英字の塊として独立している場合のみマッチ（前後が英字でない）
+            if len(keyword) <= 3 and keyword.isalpha() and text_has_japanese:
+                # 日本語文字または文字列境界で囲まれた英字キーワードにマッチ
+                # 例: 「先進的AI利活用」の「AI」にはマッチ、「Zaim」の「ai」にはマッチしない
+                pattern = r'(?<![a-zA-Z])' + re.escape(keyword) + r'(?![a-zA-Z])'
+                return bool(re.search(pattern, text, re.IGNORECASE))
+
+            # それ以外は単語境界でマッチ
             pattern = r'\b' + re.escape(keyword) + r'\b'
             return bool(re.search(pattern, text, re.IGNORECASE))
 

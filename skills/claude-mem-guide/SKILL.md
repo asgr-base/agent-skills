@@ -41,6 +41,30 @@ node ${PLUGIN_DIR}scripts/worker-cli.js start
 # 5. Claude Code再起動
 ```
 
+## LLM API設定（必須）
+
+IMPORTANT: Summary/Observationの生成にはLLM APIが必要。Claude Maxサブスクリプションでは利用不可（API別契約）。
+
+### 推奨：Gemini API（無料枠）
+
+1. [Google AI Studio](https://aistudio.google.com/apikey)でAPIキーを取得
+2. `~/.claude-mem/settings.json`を編集：
+   ```json
+   {
+     "CLAUDE_MEM_PROVIDER": "gemini",
+     "CLAUDE_MEM_GEMINI_API_KEY": "AIza..."
+   }
+   ```
+3. ワーカー再起動：`node ${PLUGIN_DIR}scripts/worker-cli.js restart`
+
+### 代替プロバイダー
+
+| プロバイダー | 設定 | 備考 |
+|-------------|------|------|
+| Gemini | `"CLAUDE_MEM_PROVIDER": "gemini"` | 無料枠あり（推奨） |
+| OpenRouter | `"CLAUDE_MEM_PROVIDER": "openrouter"` | 無料モデルあり |
+| Anthropic API | `"CLAUDE_MEM_PROVIDER": "claude"` | 従量課金 |
+
 ## VSCode/Cursor環境でのhooks設定
 
 IMPORTANT: VSCode/Cursor環境では、プラグインのhooksが自動で統合されない。`~/.claude/settings.json`に手動でhooksを追加する必要がある。
@@ -225,31 +249,40 @@ http://localhost:37777 でリアルタイムメモリを確認可能。
 
 ## セッション再開
 
-### 自動引き継ぎ（推奨）
+### 自動コンテキスト注入（推奨）
 
-SessionStart hookが関連コンテキストを自動注入する。キーワードを含めて依頼するだけでOK。
+IMPORTANT: 新しいセッションを開始するだけで、過去のコンテキストが自動注入される。特別な操作は不要。
+
+SessionStartフックが以下を自動注入：
+
+| 注入データ | デフォルト設定 |
+|-----------|--------------|
+| 最近のobservations | 50件 (`CLAUDE_MEM_CONTEXT_OBSERVATIONS`) |
+| 過去のセッションサマリー | 10件 (`CLAUDE_MEM_CONTEXT_SESSION_COUNT`) |
+
+キーワードを含めて依頼するだけでOK：
 
 ```
-前回のBizPICO API比較の続きをお願いします。
+前回のclaude-mem設定作業の続きをお願いします。
 ```
+
+### 3層Progressive Disclosure
+
+| 層 | 内容 | アクセス方法 |
+|----|------|-------------|
+| 第1層 | observationのタイトル、トークンコスト推定 | 自動表示 |
+| 第2層 | 詳細検索（概念、ファイル、タイプ、キーワード） | 質問するとMCPツールで自動検索 |
+| 第3層 | 完全な履歴・ソースコード | 直接アクセス |
+
+### /clearコマンド
+
+`/clear`を使用してもセッションは継続。コンテキストが再注入され、observationキャプチャも継続。
 
 ### 手動でSession Summaryを参照
 
 1. http://localhost:37777 でWebインターフェースを開く
 2. 再開したいセッションのSummaryをコピー
 3. 新しいセッションで貼り付けて依頼
-
-```
-前回のセッションを再開します。
-
-【Session Summary】
-- INVESTIGATED: API 016, 017, 018の比較
-- LEARNED: SDK版APIが対象、API 018は対象外
-- COMPLETED: API比較分析完了
-- NEXT STEPS: 次の指示待ち
-
-続きを進めてください。
-```
 
 ### コンテキスト注入設定（~/.claude-mem/settings.json）
 
@@ -267,7 +300,7 @@ SessionStart hookが関連コンテキストを自動注入する。キーワー
 | **Session Summary** | INVESTIGATED/LEARNED/COMPLETED/NEXT_STEPS | セッション全体の要約 |
 | **Observations** | 各ツール使用の詳細（facts, narrative, concepts） | 詳細なコンテキスト |
 
-Session Summaryは要約なので、長い会話の詳細は含まれない。詳細が必要な場合は`search` → `get_observations`で取得。
+Session Summaryは要約、Observationsに詳細が残る。詳細が必要な場合は`search` → `get_observations`で取得。
 
 ## トラブルシューティング
 
@@ -306,6 +339,16 @@ $HOME/.bun/bin/bun --version
 1. `UserPromptSubmit` hookが設定されているか確認（セッション初期化に必要）
 2. ログで`INIT_COMPLETE`が記録されているか確認
 3. `PostToolUse` hookが設定されているか確認
+4. LLM APIキーが設定されているか確認（上記「LLM API設定」参照）
+
+### Generator exited unexpectedly エラー
+
+LLM APIキーが未設定または無効。`~/.claude-mem/settings.json`でプロバイダーとAPIキーを確認：
+
+```bash
+# ログでエラー確認
+cat ~/.claude-mem/logs/claude-mem-$(date +%Y-%m-%d).log | grep -i "error"
+```
 
 ### MCPツールがタイムアウト
 
@@ -338,5 +381,5 @@ $HOME/.bun/bin/bun --version
 
 ---
 
-**Version**: 1.2.0
+**Version**: 1.4.0
 **Last Updated**: 2026-02-05
