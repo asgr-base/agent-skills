@@ -223,6 +223,52 @@ mcp__plugin_claude-mem_mcp-search__get_observations
 
 http://localhost:37777 でリアルタイムメモリを確認可能。
 
+## セッション再開
+
+### 自動引き継ぎ（推奨）
+
+SessionStart hookが関連コンテキストを自動注入する。キーワードを含めて依頼するだけでOK。
+
+```
+前回のBizPICO API比較の続きをお願いします。
+```
+
+### 手動でSession Summaryを参照
+
+1. http://localhost:37777 でWebインターフェースを開く
+2. 再開したいセッションのSummaryをコピー
+3. 新しいセッションで貼り付けて依頼
+
+```
+前回のセッションを再開します。
+
+【Session Summary】
+- INVESTIGATED: API 016, 017, 018の比較
+- LEARNED: SDK版APIが対象、API 018は対象外
+- COMPLETED: API比較分析完了
+- NEXT STEPS: 次の指示待ち
+
+続きを進めてください。
+```
+
+### コンテキスト注入設定（~/.claude-mem/settings.json）
+
+| 設定 | デフォルト | 説明 |
+|------|-----------|------|
+| `CLAUDE_MEM_CONTEXT_OBSERVATIONS` | 50 | 参照observations最大数 |
+| `CLAUDE_MEM_CONTEXT_FULL_COUNT` | 5 | 詳細narrative取得数 |
+| `CLAUDE_MEM_CONTEXT_SESSION_COUNT` | 10 | 参照セッション数 |
+| `CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY` | true | 最後のsummary表示 |
+
+### データ構造
+
+| データ | 内容 | 用途 |
+|--------|------|------|
+| **Session Summary** | INVESTIGATED/LEARNED/COMPLETED/NEXT_STEPS | セッション全体の要約 |
+| **Observations** | 各ツール使用の詳細（facts, narrative, concepts） | 詳細なコンテキスト |
+
+Session Summaryは要約なので、長い会話の詳細は含まれない。詳細が必要な場合は`search` → `get_observations`で取得。
+
 ## トラブルシューティング
 
 ### bunがPATHで見つからない
@@ -292,5 +338,5 @@ $HOME/.bun/bin/bun --version
 
 ---
 
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Last Updated**: 2026-02-05
