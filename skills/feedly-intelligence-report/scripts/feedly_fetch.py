@@ -84,7 +84,8 @@ def fetch_stream_contents(
     stream_id: str,
     count: int = 100,
     newer_than: int = None,
-    unread_only: bool = True
+    unread_only: bool = True,
+    fetch_all: bool = True
 ) -> list[dict]:
     """
     指定されたストリームから記事を取得
@@ -92,35 +93,61 @@ def fetch_stream_contents(
     Args:
         token: Feedly API token
         stream_id: Feedly stream ID
-        count: 取得する記事数
+        count: 1回のリクエストで取得する記事数（最大1000）
         newer_than: この時刻（Unix timestamp ms）より新しい記事のみ取得
         unread_only: Trueの場合、未読記事のみを取得（デフォルト: True）
+        fetch_all: Trueの場合、continuationトークンを使って全件取得（デフォルト: True）
 
     Returns:
         記事リスト
     """
     headers = {"Authorization": f"Bearer {token}"}
-    params = {
-        "streamId": stream_id,
-        "count": min(count, 1000),  # API上限
-        "unreadOnly": "true" if unread_only else "false",
-    }
-    if newer_than:
-        params["newerThan"] = newer_than
+    all_articles = []
+    continuation = None
+    page = 1
 
-    try:
-        resp = requests.get(
-            f"{FEEDLY_API_BASE}/streams/contents",
-            headers=headers,
-            params=params,
-            timeout=30
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("items", [])
-    except requests.RequestException as e:
-        print(f"Error fetching stream {stream_id}: {e}", file=sys.stderr)
-        return []
+    while True:
+        params = {
+            "streamId": stream_id,
+            "count": min(count, 1000),  # API上限
+            "unreadOnly": "true" if unread_only else "false",
+        }
+        if newer_than:
+            params["newerThan"] = newer_than
+        if continuation:
+            params["continuation"] = continuation
+
+        try:
+            resp = requests.get(
+                f"{FEEDLY_API_BASE}/streams/contents",
+                headers=headers,
+                params=params,
+                timeout=30
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            items = data.get("items", [])
+            all_articles.extend(items)
+
+            if page > 1:
+                print(f"    page {page}: +{len(items)} articles (total: {len(all_articles)})", file=sys.stderr)
+
+            # 全件取得モードでない場合、または続きがない場合は終了
+            if not fetch_all:
+                break
+
+            continuation = data.get("continuation")
+            if not continuation:
+                break
+
+            page += 1
+
+        except requests.RequestException as e:
+            print(f"Error fetching stream {stream_id}: {e}", file=sys.stderr)
+            break
+
+    return all_articles
 
 
 def extract_article_url(article: dict) -> str:
