@@ -18,6 +18,8 @@ claude-memはClaude Codeの永続メモリプラグイン。セッション間�
 | MCPツールがエラー | ワーカー起動後、Claude Code再起動 |
 | メモリが記録されない | hooks設定確認（VSCode/Cursor環境では手動設定が必要） |
 | hookでbunが見つからない | `~/.zshenv`にPATH設定を追加 |
+| **memorySessionId not yet captured** | **claudeプロバイダーに切り替え（推奨）、またはワークアラウンド適用** |
+| Gemini 429 quota exceeded | 別モデルに切り替え、またはclaudeプロバイダーを使用 |
 
 ## インストール
 
@@ -43,27 +45,48 @@ node ${PLUGIN_DIR}scripts/worker-cli.js start
 
 ## LLM API設定（必須）
 
-IMPORTANT: Summary/Observationの生成にはLLM APIが必要。Claude Maxサブスクリプションでは利用不可（API別契約）。
+IMPORTANT: Summary/Observationの生成にはLLM APIが必要。
 
-### 推奨：Gemini API（無料枠）
+### 推奨：claudeプロバイダー（Claude Max/APIキー）
 
+**IMPORTANT**: Gemini/OpenRouterプロバイダーには`memorySessionId not yet captured`バグ（Issue #623）があります。**claudeプロバイダーを推奨**。
+
+claudeプロバイダーはClaude Code CLI + Agent SDK経由で動作し、以下のいずれかで認証：
+- **Claude Maxサブスクリプション**（追加料金なし）
+- **Anthropic APIキー**（従量課金）
+
+```json
+{
+  "CLAUDE_MEM_PROVIDER": "claude",
+  "CLAUDE_MEM_MODEL": "claude-sonnet-4-5"
+}
+```
+
+### 代替：Gemini API（バグあり・非推奨）
+
+**WARNING**: Gemini/OpenRouterはstatelessプロバイダーのため、`memorySessionId`をキャプチャできず、無限クラッシュリカバリーループが発生する可能性があります（Issue #623）。PR #615がマージされるまで非推奨。
+
+使用する場合：
 1. [Google AI Studio](https://aistudio.google.com/apikey)でAPIキーを取得
 2. `~/.claude-mem/settings.json`を編集：
    ```json
    {
      "CLAUDE_MEM_PROVIDER": "gemini",
-     "CLAUDE_MEM_GEMINI_API_KEY": "AIza..."
+     "CLAUDE_MEM_GEMINI_API_KEY": "AIza...",
+     "CLAUDE_MEM_GEMINI_MODEL": "gemini-2.0-flash"
    }
    ```
 3. ワーカー再起動：`node ${PLUGIN_DIR}scripts/worker-cli.js restart`
 
-### 代替プロバイダー
+**注意**: 無料枠を超えると429エラー（quota exceeded）が発生。異なるモデルは異なるクォータを持つ。
 
-| プロバイダー | 設定 | 備考 |
-|-------------|------|------|
-| Gemini | `"CLAUDE_MEM_PROVIDER": "gemini"` | 無料枠あり（推奨） |
-| OpenRouter | `"CLAUDE_MEM_PROVIDER": "openrouter"` | 無料モデルあり |
-| Anthropic API | `"CLAUDE_MEM_PROVIDER": "claude"` | 従量課金 |
+### プロバイダー比較
+
+| プロバイダー | 設定 | memorySessionId | 推奨度 |
+|-------------|------|-----------------|--------|
+| **claude** | `"CLAUDE_MEM_PROVIDER": "claude"` | ✓ 正常動作 | **推奨** |
+| gemini | `"CLAUDE_MEM_PROVIDER": "gemini"` | ✗ バグあり | 非推奨 |
+| openrouter | `"CLAUDE_MEM_PROVIDER": "openrouter"` | ✗ バグあり | 非推奨 |
 
 ## VSCode/Cursor環境でのhooks設定
 
@@ -350,6 +373,55 @@ LLM APIキーが未設定または無効。`~/.claude-mem/settings.json`でプ�
 cat ~/.claude-mem/logs/claude-mem-$(date +%Y-%m-%d).log | grep -i "error"
 ```
 
+### memorySessionId not yet captured エラー（Issue #623）
+
+**症状**:
+- `Cannot store observations: memorySessionId not yet captured`エラーが繰り返し発生
+- 無限のクラッシュリカバリーループ
+- キューが蓄積（queueDepth増加）
+- observationsが記録されない
+
+**原因**: Gemini/OpenRouterはstatelessプロバイダーで、`memorySessionId`を返さないため発生。
+
+**推奨解決策**: claudeプロバイダーに切り替え
+
+```json
+{
+  "CLAUDE_MEM_PROVIDER": "claude"
+}
+```
+
+**一時的ワークアラウンド**（Gemini/OpenRouterを使い続ける場合）:
+
+```bash
+# 1. ワーカー停止
+pkill -f "worker-service"
+
+# 2. stuck queueをクリア
+sqlite3 ~/.claude-mem/claude-mem.db "DELETE FROM pending_messages;"
+
+# 3. 壊れたセッションをfailedにマーク
+sqlite3 ~/.claude-mem/claude-mem.db "UPDATE sdk_sessions SET status = 'failed' WHERE memory_session_id IS NULL OR memory_session_id = '';"
+
+# 4. ワーカー再起動
+source ~/.zshenv && node ${PLUGIN_DIR}scripts/worker-cli.js start
+```
+
+**関連Issue**: [#623 - Crash-recovery loop when memory_session_id is not captured](https://github.com/thedotmack/claude-mem/issues/623)
+
+**修正予定**: PR #615（generate memorySessionId for stateless providers）がマージされれば解消
+
+### Gemini 429 quota exceeded エラー
+
+**症状**: `Quota exceeded for metric: generate_content_paid_tier_input_token_count`
+
+**原因**: Gemini APIの無料枠を超過
+
+**解決策**:
+1. 30秒待ってリトライ（クォータがリセットされる）
+2. 別のモデルに切り替え（異なるモデルは異なるクォータ）
+3. claudeプロバイダーに切り替え（推奨）
+
 ### MCPツールがタイムアウト
 
 1. ワーカー起動確認: `lsof -i :37777`
@@ -381,5 +453,8 @@ cat ~/.claude-mem/logs/claude-mem-$(date +%Y-%m-%d).log | grep -i "error"
 
 ---
 
-**Version**: 1.4.0
+**Version**: 1.5.0
 **Last Updated**: 2026-02-05
+
+**更新履歴**:
+- v1.5.0 (2026-02-05): プロバイダー比較を追加。claudeプロバイダーを推奨に変更。Issue #623（memorySessionId not yet captured）のワークアラウンドを追加。Gemini 429エラー対処を追加。
