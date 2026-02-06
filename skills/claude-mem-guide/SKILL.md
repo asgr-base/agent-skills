@@ -22,6 +22,7 @@ claude-memはClaude Codeの永続メモリプラグイン。セッション間�
 | hookでbunが見つからない | `~/.zshenv`にPATH設定を追加 |
 | **memorySessionId not yet captured** | **claudeプロバイダーに切り替え（推奨）、またはワークアラウンド適用** |
 | Gemini 429 quota exceeded | 別モデルに切り替え、またはclaudeプロバイダーを使用 |
+| **Unknown event type: session-complete** | **hooks.jsonから該当行を削除後、Claude Code再起動（v9.0.17ビルドバグ）** |
 
 ## インストール
 
@@ -392,6 +393,23 @@ curl -s http://localhost:37777/api/health
 2. 別のモデルに切り替え（異なるモデルは異なるクォータ）
 3. claudeプロバイダーに切り替え（推奨）
 
+### Unknown event type: session-complete エラー
+
+**症状**: Stopフック実行時に`Unknown event type: session-complete`エラーが毎回表示される
+
+**原因**: v9.0.17のビルドバグ。`hooks.json`が`session-complete`イベントを送信するが、`worker-service.cjs`にハンドラが未バンドル
+
+**解決策**:
+
+```bash
+# hooks.jsonからsession-complete行を削除
+PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/thedotmack/claude-mem/*/ | sort -V | tail -1)
+# ${PLUGIN_DIR}hooks/hooks.json のStop内から session-complete のブロックを削除
+# その後 Claude Codeを再起動（現セッション中はhooksがメモリにキャッシュされているため）
+```
+
+**注意**: プラグイン更新時にhooks.jsonが上書きされ再発する可能性あり。再発した場合は同じ修正を再適用。
+
 ### MCPツールがタイムアウト
 
 1. ワーカー起動確認: `lsof -i :37777`
@@ -423,9 +441,10 @@ curl -s http://localhost:37777/api/health
 
 ---
 
-**Version**: 1.6.0
+**Version**: 1.7.0
 **Last Updated**: 2026-02-06
 
 **更新履歴**:
+- v1.7.0 (2026-02-06): session-completeビルドバグ（v9.0.17）の対処を追加。
 - v1.6.0 (2026-02-06): hooks二重実行の問題と対処を追加。FOREIGN KEY constraintエラーの対処を追加。enabledPluginsによる自動hook登録の注意事項を明記。
 - v1.5.0 (2026-02-05): プロバイダー比較を追加。claudeプロバイダーを推奨に変更。Issue #623（memorySessionId not yet captured）のワークアラウンドを追加。Gemini 429エラー対処を追加。
