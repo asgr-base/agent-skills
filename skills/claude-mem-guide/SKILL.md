@@ -16,11 +16,12 @@ claude-memはClaude Codeの永続メモリプラグイン。セッション間�
 | localhost:37777にアクセスできない | ワーカー未起動 → `worker-cli.js start` |
 | "Bun is required" エラー | Bunインストール後、PATH設定を確認 |
 | MCPツールがエラー | ワーカー起動後、Claude Code再起動 |
-| メモリが記録されない | LLM API設定確認 |
+| メモリが記録されない | プラグイン再インストール、ワーカー再起動 |
+| **hooksが二重実行される** | **`~/.claude/settings.json`から手動hooks設定を削除（enabledPluginsで自動hook）** |
+| **FOREIGN KEY constraint failed** | **DBリセット：`rm ~/.claude-mem/claude-mem.db*`後ワーカー再起動** |
 | hookでbunが見つからない | `~/.zshenv`にPATH設定を追加 |
-| memorySessionId not yet captured | claudeプロバイダーに切り替え |
-| **hookが二重発火する** | **settings.jsonからhooksを削除（プラグイン有効化時は自動登録）** |
-| **Generator aborted / CPU暴走** | **ワーカー停止 → キュークリア → ワーカー再起動** |
+| **memorySessionId not yet captured** | **claudeプロバイダーに切り替え（推奨）、またはワークアラウンド適用** |
+| Gemini 429 quota exceeded | 別モデルに切り替え、またはclaudeプロバイダーを使用 |
 
 ## インストール
 
@@ -38,39 +39,23 @@ echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> ~/.zshenv
 
 # 4. ワーカー起動
 source ~/.zshenv
+PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/thedotmack/claude-mem/*/ | head -1)
 node ${PLUGIN_DIR}scripts/worker-cli.js start
 
 # 5. Claude Code再起動
 ```
 
-**注意**: `$PLUGIN_DIR`はプラグインのインストール先に置き換える。確認方法：
-
-```bash
-# marketplaces配置の場合
-ls ~/.claude/plugins/marketplaces/thedotmack/plugin/
-
-# cache配置の場合
-ls -d ~/.claude/plugins/cache/thedotmack/claude-mem/*/
-```
-
 ## LLM API設定（必須）
 
-Summary/Observationの生成にはLLMが必要。以下の3つのプロバイダーから選択する。
+IMPORTANT: Summary/Observationの生成にはLLM APIが必要。
 
-### プロバイダー比較
+### 推奨：claudeプロバイダー（Claude Max/APIキー）
 
-| プロバイダー | 認証方式 | コスト | memorySessionIdバグ |
-|-------------|---------|--------|---------------------|
-| **claude** | Claude Code CLI（ローカル実行） | Claude Max: 追加費用なし / API: 従量課金 | なし |
-| gemini | Google AI Studio APIキー | 無料枠あり（レート制限注意） | あり（Issue #623） |
-| openrouter | OpenRouter APIキー | 従量課金 | あり（Issue #623） |
+**IMPORTANT**: Gemini/OpenRouterプロバイダーには`memorySessionId not yet captured`バグ（Issue #623）があります。**claudeプロバイダーを推奨**。
 
-### claudeプロバイダー（推奨）
-
-ローカルのClaude Code CLIを経由してLLMを呼び出す。外部APIキーやプロキシサーバーは不要。
-
-- **Claude Maxサブスクリプション**: 追加費用なし
-- **Anthropic APIキー**: 従量課金
+claudeプロバイダーはClaude Code CLI + Agent SDK経由で動作し、以下のいずれかで認証：
+- **Claude Maxサブスクリプション**（追加料金なし）
+- **Anthropic APIキー**（従量課金）
 
 ```json
 {
@@ -79,128 +64,37 @@ Summary/Observationの生成にはLLMが必要。以下の3つのプロバイダ
 }
 ```
 
-### Geminiプロバイダー
+### 代替：Gemini API（バグあり・非推奨）
 
-[Google AI Studio](https://aistudio.google.com/apikey)でAPIキーを取得して設定。
+**WARNING**: Gemini/OpenRouterはstatelessプロバイダーのため、`memorySessionId`をキャプチャできず、無限クラッシュリカバリーループが発生する可能性があります（Issue #623）。PR #615がマージされるまで非推奨。
 
-```json
-{
-  "CLAUDE_MEM_PROVIDER": "gemini",
-  "CLAUDE_MEM_GEMINI_API_KEY": "AIza...",
-  "CLAUDE_MEM_GEMINI_MODEL": "gemini-2.0-flash"
-}
-```
+使用する場合：
+1. [Google AI Studio](https://aistudio.google.com/apikey)でAPIキーを取得
+2. `~/.claude-mem/settings.json`を編集：
+   ```json
+   {
+     "CLAUDE_MEM_PROVIDER": "gemini",
+     "CLAUDE_MEM_GEMINI_API_KEY": "AIza...",
+     "CLAUDE_MEM_GEMINI_MODEL": "gemini-2.0-flash"
+   }
+   ```
+3. ワーカー再起動：`node ${PLUGIN_DIR}scripts/worker-cli.js restart`
 
-**注意**: 無料枠にはレート制限がある。429エラーが発生する場合はモデル変更またはclaudeプロバイダーへの切り替えを検討。
+**注意**: 無料枠を超えると429エラー（quota exceeded）が発生。異なるモデルは異なるクォータを持つ。
 
-### OpenRouterプロバイダー
+### プロバイダー比較
 
-```json
-{
-  "CLAUDE_MEM_PROVIDER": "openrouter",
-  "CLAUDE_MEM_OPENROUTER_API_KEY": "sk-or-...",
-  "CLAUDE_MEM_OPENROUTER_MODEL": "anthropic/claude-sonnet-4-5"
-}
-```
+| プロバイダー | 設定 | memorySessionId | 推奨度 |
+|-------------|------|-----------------|--------|
+| **claude** | `"CLAUDE_MEM_PROVIDER": "claude"` | ✓ 正常動作 | **推奨** |
+| gemini | `"CLAUDE_MEM_PROVIDER": "gemini"` | ✗ バグあり | 非推奨 |
+| openrouter | `"CLAUDE_MEM_PROVIDER": "openrouter"` | ✗ バグあり | 非推奨 |
 
-### memorySessionIdバグについて（Issue #623）
+## Hooks
 
-Gemini/OpenRouterはstatelessプロバイダーのため、`memorySessionId`を返さず無限クラッシュリカバリーループが発生する場合がある。claudeプロバイダーでは発生しない。
+プラグインインストール時に`enabledPlugins`経由で自動でhooksが設定される。手動設定は不要。
 
-**ワークアラウンド**（Gemini/OpenRouterを使い続ける場合）:
-
-```bash
-# stuck queueとセッションをリセット
-sqlite3 ~/.claude-mem/claude-mem.db "DELETE FROM pending_messages;"
-sqlite3 ~/.claude-mem/claude-mem.db "UPDATE sdk_sessions SET status = 'failed' WHERE memory_session_id IS NULL OR memory_session_id = '';"
-# ワーカー再起動
-node ${PLUGIN_DIR}scripts/worker-cli.js restart
-```
-
-**関連**: [Issue #623](https://github.com/thedotmack/claude-mem/issues/623) / [PR #615](https://github.com/thedotmack/claude-mem/pull/615)
-
-## hooks設定
-
-### プラグイン有効化時（推奨）
-
-`enabledPlugins`でプラグインを有効化すると、hooksはプラグインが自動登録する。
-
-```json
-{
-  "enabledPlugins": {
-    "claude-mem@thedotmack": true
-  }
-}
-```
-
-**WARNING**: この場合、`~/.claude/settings.json`にhooksを手動追加してはならない。プラグインのhooksとsettings.jsonのhooksが**両方同時に実行され、二重発火**が発生する。二重発火はDB不整合（FOREIGN KEY constraint failed）→ Generator abortedの連鎖 → CPU暴走を引き起こす。
-
-### プラグイン無効化時のみ手動設定
-
-プラグインを無効化した状態でhooksのみ使いたい場合に限り、`~/.claude/settings.json`に手動で追加する（`$PLUGIN_DIR`は実際のパスに置き換え）：
-
-```json
-{
-  "enabledPlugins": {
-    "claude-mem@thedotmack": false
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.bun/bin/bun $PLUGIN_DIR/scripts/worker-service.cjs hook claude-code context",
-            "timeout": 60000
-          },
-          {
-            "type": "command",
-            "command": "$HOME/.bun/bin/bun $PLUGIN_DIR/scripts/worker-service.cjs hook claude-code user-message",
-            "timeout": 60000
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.bun/bin/bun $PLUGIN_DIR/scripts/worker-service.cjs hook claude-code session-init",
-            "timeout": 60000
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.bun/bin/bun $PLUGIN_DIR/scripts/worker-service.cjs hook claude-code observation",
-            "timeout": 30000
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/.bun/bin/bun $PLUGIN_DIR/scripts/worker-service.cjs hook claude-code summarize",
-            "timeout": 120000
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+**WARNING**: `~/.claude/settings.json`にclaude-memのhooksを手動で追加しないこと。`enabledPlugins`による自動hookと二重実行になり、全てのobservation/summaryが2回ずつ処理される。手動hooks設定がある場合は削除すること。
 
 ### 各hookの役割
 
@@ -209,21 +103,25 @@ node ${PLUGIN_DIR}scripts/worker-cli.js restart
 | `SessionStart` | コンテキスト生成、ユーザーメッセージ準備 |
 | `UserPromptSubmit` | セッション初期化（session_id取得） |
 | `PostToolUse` | ツール使用後にobservation記録 |
-| `Stop` | ターン終了時にサマリー生成 |
+| `Stop` | セッション終了時にサマリー生成 |
 
 ## ディレクトリ構成
 
 | パス | 内容 |
 |------|------|
 | `~/.claude-mem/` | データディレクトリ |
-| `~/.claude-mem/settings.json` | 設定ファイル |
+| `~/.claude-mem/settings.json` | claude-mem設定ファイル |
 | `~/.claude-mem/logs/` | ログファイル |
 | `~/.claude-mem/claude-mem.db` | SQLiteデータベース |
-| `~/.claude/plugins/` | プラグイン本体（marketplacesまたはcache配下） |
+| `~/.claude/plugins/cache/thedotmack/claude-mem/` | プラグイン本体 |
 
 ## ワーカー管理
 
 ```bash
+# プラグインディレクトリを取得
+PLUGIN_DIR=$(ls -d ~/.claude/plugins/cache/thedotmack/claude-mem/*/ | head -1)
+
+# ワーカーコマンド
 node ${PLUGIN_DIR}scripts/worker-cli.js start    # 起動
 node ${PLUGIN_DIR}scripts/worker-cli.js stop     # 停止
 node ${PLUGIN_DIR}scripts/worker-cli.js restart  # 再起動
@@ -235,29 +133,39 @@ lsof -i :37777
 
 ## 動作確認
 
+### 1. ワーカー確認
+
 ```bash
-# ヘルスチェック
 curl -s http://localhost:37777/api/health
+# 期待出力: {"status":"ok",...}
+```
 
-# 統計確認（observations数、sessions数等）
+### 2. 統計確認
+
+```bash
 curl -s http://localhost:37777/api/stats
+# 期待出力: {"worker":{...},"database":{"observations":N,"sessions":N,...}}
+```
 
-# ログでhook動作確認
+### 3. ログでhook動作確認
+
+```bash
 cat ~/.claude-mem/logs/claude-mem-$(date +%Y-%m-%d).log | grep -E "HOOK|INIT_COMPLETE"
+# 期待出力: [HOOK ] → PostToolUse: ... / INIT_COMPLETE | sessionDbId=...
 ```
 
 ### 正常動作の指標
 
 | 項目 | 確認方法 |
 |------|---------|
-| ワーカー起動 | `lsof -i :37777` でプロセスが表示 |
+| ワーカー起動 | `lsof -i :37777` でbunプロセスが表示 |
 | セッション初期化 | ログに`INIT_COMPLETE`が記録 |
 | observation記録 | `api/stats`で`observations`が増加 |
 | hook実行 | ログに`[HOOK ]`エントリが記録 |
 
 ## MCPツール（3層検索）
 
-トークン節約のため、3層ワークフローに従う。
+IMPORTANT: トークン節約のため、必ず3層ワークフローに従うこと。
 
 ### 1. search（インデックス検索）
 
@@ -286,50 +194,11 @@ mcp__plugin_claude-mem_mcp-search__get_observations
 
 フィルタ済みIDの完全な詳細を取得。最後に使用。
 
-## セッション再開
-
-### 自動コンテキスト注入
-
-新しいセッションを開始すると、SessionStartフックが過去のコンテキストを自動注入する。
-
-| 注入データ | デフォルト設定 |
-|-----------|--------------|
-| 最近のobservations | 50件 (`CLAUDE_MEM_CONTEXT_OBSERVATIONS`) |
-| 過去のセッションサマリー | 10件 (`CLAUDE_MEM_CONTEXT_SESSION_COUNT`) |
-
-キーワードを含めて依頼するだけで関連コンテキストが活用される：
-
-```
-前回のAPI設計作業の続きをお願いします。
-```
-
-### 3層Progressive Disclosure
-
-| 層 | 内容 | アクセス方法 |
-|----|------|-------------|
-| 第1層 | observationのタイトル、トークンコスト推定 | 自動表示 |
-| 第2層 | 詳細検索（概念、ファイル、タイプ、キーワード） | MCPツールで検索 |
-| 第3層 | 完全な履歴・ソースコード | 直接アクセス |
-
-### /clearコマンド
-
-`/clear`を使用してもセッションは継続。コンテキストが再注入され、observationキャプチャも継続。
-
-### コンテキスト注入設定
+## 設定（~/.claude-mem/settings.json）
 
 | 設定 | デフォルト | 説明 |
 |------|-----------|------|
-| `CLAUDE_MEM_CONTEXT_OBSERVATIONS` | 50 | 参照observations最大数 |
-| `CLAUDE_MEM_CONTEXT_FULL_COUNT` | 5 | 詳細narrative取得数 |
-| `CLAUDE_MEM_CONTEXT_SESSION_COUNT` | 10 | 参照セッション数 |
-| `CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY` | true | 最後のsummary表示 |
-
-## 設定リファレンス（~/.claude-mem/settings.json）
-
-| 設定 | デフォルト | 説明 |
-|------|-----------|------|
-| `CLAUDE_MEM_PROVIDER` | - | LLMプロバイダー（claude/gemini/openrouter） |
-| `CLAUDE_MEM_MODEL` | claude-sonnet-4-5 | 使用モデル |
+| `CLAUDE_MEM_MODEL` | claude-sonnet-4-5 | 圧縮用モデル |
 | `CLAUDE_MEM_WORKER_PORT` | 37777 | ワーカーポート |
 | `CLAUDE_MEM_DATA_DIR` | ~/.claude-mem | データ保存先 |
 | `CLAUDE_MEM_LOG_LEVEL` | INFO | ログレベル |
@@ -339,6 +208,61 @@ mcp__plugin_claude-mem_mcp-search__get_observations
 
 http://localhost:37777 でリアルタイムメモリを確認可能。
 
+## セッション再開
+
+### 自動コンテキスト注入（推奨）
+
+IMPORTANT: 新しいセッションを開始するだけで、過去のコンテキストが自動注入される。特別な操作は不要。
+
+SessionStartフックが以下を自動注入：
+
+| 注入データ | デフォルト設定 |
+|-----------|--------------|
+| 最近のobservations | 50件 (`CLAUDE_MEM_CONTEXT_OBSERVATIONS`) |
+| 過去のセッションサマリー | 10件 (`CLAUDE_MEM_CONTEXT_SESSION_COUNT`) |
+
+キーワードを含めて依頼するだけでOK：
+
+```
+前回のclaude-mem設定作業の続きをお願いします。
+```
+
+### 3層Progressive Disclosure
+
+| 層 | 内容 | アクセス方法 |
+|----|------|-------------|
+| 第1層 | observationのタイトル、トークンコスト推定 | 自動表示 |
+| 第2層 | 詳細検索（概念、ファイル、タイプ、キーワード） | 質問するとMCPツールで自動検索 |
+| 第3層 | 完全な履歴・ソースコード | 直接アクセス |
+
+### /clearコマンド
+
+`/clear`を使用してもセッションは継続。コンテキストが再注入され、observationキャプチャも継続。
+
+### 手動でSession Summaryを参照
+
+1. http://localhost:37777 でWebインターフェースを開く
+2. 再開したいセッションのSummaryをコピー
+3. 新しいセッションで貼り付けて依頼
+
+### コンテキスト注入設定（~/.claude-mem/settings.json）
+
+| 設定 | デフォルト | 説明 |
+|------|-----------|------|
+| `CLAUDE_MEM_CONTEXT_OBSERVATIONS` | 50 | 参照observations最大数 |
+| `CLAUDE_MEM_CONTEXT_FULL_COUNT` | 5 | 詳細narrative取得数 |
+| `CLAUDE_MEM_CONTEXT_SESSION_COUNT` | 10 | 参照セッション数 |
+| `CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY` | true | 最後のsummary表示 |
+
+### データ構造
+
+| データ | 内容 | 用途 |
+|--------|------|------|
+| **Session Summary** | INVESTIGATED/LEARNED/COMPLETED/NEXT_STEPS | セッション全体の要約 |
+| **Observations** | 各ツール使用の詳細（facts, narrative, concepts） | 詳細なコンテキスト |
+
+Session Summaryは要約、Observationsに詳細が残る。詳細が必要な場合は`search` → `get_observations`で取得。
+
 ## トラブルシューティング
 
 ### bunがPATHで見つからない
@@ -346,6 +270,7 @@ http://localhost:37777 でリアルタイムメモリを確認可能。
 非対話シェル（hooks実行環境）では`~/.zshrc`が読み込まれない。`~/.zshenv`にPATH設定を追加：
 
 ```bash
+# ~/.zshenv に追加
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
 ```
@@ -356,47 +281,122 @@ export PATH="$BUN_INSTALL/bin:$PATH"
 # ログ確認
 cat ~/.claude-mem/logs/claude-mem-$(date +%Y-%m-%d).log | tail -50
 
-# Bunバージョン確認
+# Bunパス確認
+which bun || echo "Bunがインストールされていない"
+
+# フルパスで確認
 $HOME/.bun/bin/bun --version
 ```
 
-### hookが二重発火する
+### hooksが動作しない
 
-**症状**: ログで`INIT_COMPLETE`が同一タイムスタンプで2回記録される。PROMPTが重複して記録される。
+1. `enabledPlugins`でclaude-memが有効か確認（`~/.claude/settings.json`）
+2. bunのPATHが`~/.zshenv`に設定されているか確認
+3. ワーカーが起動しているか確認（`curl -s http://localhost:37777/api/health`）
+4. Claude Codeを再起動
 
-**原因**: `enabledPlugins`でプラグインを有効化した状態で、`~/.claude/settings.json`にhooksも手動設定している。プラグインのhooksとsettings.jsonのhooksが両方実行される。
+### observationsが記録されない
 
-**解決策**: `~/.claude/settings.json`からhooksセクションを削除する。プラグイン有効化時はhooksは自動登録される。
+1. ログで`INIT_COMPLETE`が記録されているか確認
+2. ログで`[HOOK ]`エントリが記録されているか確認
+3. LLM APIキーが設定されているか確認（上記「LLM API設定」参照）
+4. FOREIGN KEYエラーが出ていないか確認（出ていればDBリセット）
 
-### Generator aborted / CPU暴走
+### Generator exited unexpectedly エラー
 
-**症状**: ログに`Generator aborted`が大量発生。bunプロセスがCPU 200%以上を消費。
+LLM APIキーが未設定または無効。`~/.claude-mem/settings.json`でプロバイダーとAPIキーを確認：
 
-**原因**: FOREIGN KEY constraint failedやhook二重発火により処理キューが破損し、無限リトライループが発生。
+```bash
+# ログでエラー確認
+cat ~/.claude-mem/logs/claude-mem-$(date +%Y-%m-%d).log | grep -i "error"
+```
 
-**解決策**:
+### memorySessionId not yet captured エラー（Issue #623）
+
+**症状**:
+- `Cannot store observations: memorySessionId not yet captured`エラーが繰り返し発生
+- 無限のクラッシュリカバリーループ
+- キューが蓄積（queueDepth増加）
+- observationsが記録されない
+
+**原因**: Gemini/OpenRouterはstatelessプロバイダーで、`memorySessionId`を返さないため発生。
+
+**推奨解決策**: claudeプロバイダーに切り替え
+
+```json
+{
+  "CLAUDE_MEM_PROVIDER": "claude"
+}
+```
+
+**一時的ワークアラウンド**（Gemini/OpenRouterを使い続ける場合）:
 
 ```bash
 # 1. ワーカー停止
 pkill -f "worker-service"
-pkill -9 -f "bun.*claude-mem"
 
-# 2. キュークリア
+# 2. stuck queueをクリア
 sqlite3 ~/.claude-mem/claude-mem.db "DELETE FROM pending_messages;"
 
-# 3. ワーカー再起動
-node ${PLUGIN_DIR}scripts/worker-cli.js start
+# 3. 壊れたセッションをfailedにマーク
+sqlite3 ~/.claude-mem/claude-mem.db "UPDATE sdk_sessions SET status = 'failed' WHERE memory_session_id IS NULL OR memory_session_id = '';"
+
+# 4. ワーカー再起動
+source ~/.zshenv && node ${PLUGIN_DIR}scripts/worker-cli.js start
 ```
 
-### observationsが記録されない
+**関連Issue**: [#623 - Crash-recovery loop when memory_session_id is not captured](https://github.com/thedotmack/claude-mem/issues/623)
 
-1. LLM API設定が正しいか確認（プロバイダー・認証情報）
-2. ログで`INIT_COMPLETE`が記録されているか確認
-3. ログで`Generator aborted`が発生していないか確認
+**修正予定**: PR #615（generate memorySessionId for stateless providers）がマージされれば解消
 
-### Generator exited unexpectedly
+### hooks二重実行
 
-LLM APIの認証情報が未設定または無効。`~/.claude-mem/settings.json`でプロバイダーとAPIキーを確認。
+**症状**:
+- ログで全てのhookエントリが2回ずつ記録される
+- observation/summaryが重複処理される
+- 処理負荷が倍増
+
+**原因**: `enabledPlugins`によるプラグイン自動hookと、`~/.claude/settings.json`内の手動hooks設定が共存
+
+**解決策**: `~/.claude/settings.json`からclaude-memのhooks設定（SessionStart, UserPromptSubmit, PostToolUse, Stop）を削除。`enabledPlugins`のみで動作する。
+
+### FOREIGN KEY constraint failed エラー
+
+**症状**:
+- `FOREIGN KEY constraint failed`エラーでGeneratorが停止
+- `Generator exited unexpectedly`が続く
+- observationsが記録されない
+
+**原因**: プロバイダー切り替え、ワーカー再起動、またはDB不整合で古いセッションデータとの参照関係が壊れる
+
+**解決策**: DBリセット
+
+```bash
+# 1. DBファイルを削除（observations/summariesは失われる）
+rm ~/.claude-mem/claude-mem.db ~/.claude-mem/claude-mem.db-wal ~/.claude-mem/claude-mem.db-shm 2>/dev/null
+
+# 2. ワーカーが自動で新DBを作成（health checkで確認）
+curl -s http://localhost:37777/api/health
+```
+
+**関連**: ワーカー再起動時にIssue #817（stale memory_session_id）の警告が出ることがある。これ自体は自動処理されるが、FOREIGN KEYエラーを伴う場合はDBリセットが必要。
+
+### Gemini 429 quota exceeded エラー
+
+**症状**: `Quota exceeded for metric: generate_content_paid_tier_input_token_count`
+
+**原因**: Gemini APIの無料枠を超過
+
+**解決策**:
+1. 30秒待ってリトライ（クォータがリセットされる）
+2. 別のモデルに切り替え（異なるモデルは異なるクォータ）
+3. claudeプロバイダーに切り替え（推奨）
+
+### MCPツールがタイムアウト
+
+1. ワーカー起動確認: `lsof -i :37777`
+2. 起動していなければ: `worker-cli.js start`
+3. Claude Code再起動
 
 ### プライバシー制御
 
@@ -415,25 +415,6 @@ LLM APIの認証情報が未設定または無効。`~/.claude-mem/settings.json
 | `claude-mem:make-plan` | 実装計画作成 |
 | `claude-mem:do` | サブエージェントで計画実行 |
 
-## 完全アンインストール
-
-```bash
-# 1. ワーカー停止
-node ${PLUGIN_DIR}scripts/worker-cli.js stop
-
-# 2. プラグイン無効化
-/plugin disable claude-mem
-
-# 3. データ・設定削除
-rm -rf ~/.claude-mem/
-
-# 4. プラグイン本体削除
-rm -rf ~/.claude/plugins/marketplaces/thedotmack/
-rm -rf ~/.claude/plugins/cache/thedotmack/
-
-# 5. hooks設定を~/.claude/settings.jsonから削除
-```
-
 ## 関連リソース
 
 - [GitHub - thedotmack/claude-mem](https://github.com/thedotmack/claude-mem)
@@ -442,10 +423,9 @@ rm -rf ~/.claude/plugins/cache/thedotmack/
 
 ---
 
-**Version**: 2.1.0
+**Version**: 1.6.0
 **Last Updated**: 2026-02-06
 
 **更新履歴**:
-- v2.1.0 (2026-02-06): hooks二重発火問題の警告を追加。プラグイン有効化時はsettings.jsonにhooksを追加しないことを明記。Generator aborted/CPU暴走のトラブルシューティングを追加。
-- v2.0.0 (2026-02-06): 汎用公開向けに全体リライト。claudeプロバイダーがローカルClaude Code CLI経由で動作することを明確化。プロバイダー比較を整理。完全アンインストール手順を追加。
-- v1.5.0 (2026-02-05): プロバイダー比較を追加。Issue #623ワークアラウンドを追加。
+- v1.6.0 (2026-02-06): hooks二重実行の問題と対処を追加。FOREIGN KEY constraintエラーの対処を追加。enabledPluginsによる自動hook登録の注意事項を明記。
+- v1.5.0 (2026-02-05): プロバイダー比較を追加。claudeプロバイダーを推奨に変更。Issue #623（memorySessionId not yet captured）のワークアラウンドを追加。Gemini 429エラー対処を追加。
