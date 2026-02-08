@@ -368,7 +368,7 @@ source ~/.zshenv && node ${PLUGIN_DIR}scripts/worker-cli.js start
 - `Generator exited unexpectedly`が続く
 - observationsが記録されない
 
-**原因**: プロバイダー切り替え、ワーカー再起動、またはDB不整合で古いセッションデータとの参照関係が壊れる
+**原因**: ワーカー再起動時にセッションIDが変わり、古いセッションデータとの参照関係が壊れる。頻発する（92回/2日間の実績あり）。ワーカー再起動のたびに発生する可能性が高い
 
 **解決策**: DBリセット
 
