@@ -17,10 +17,8 @@
 
   "scoring": {
     "weights": {
-      "engagement": 0.30,
-      "relevance": 0.40,
-      "freshness": 0.20,
-      "source_trust": 0.10
+      "engagement": 0.60,
+      "relevance": 0.40
     },
     "thresholds": {
       "must_read": 55,

@@ -151,7 +151,7 @@ def normalize_title(title: str) -> str:
     for sep in [" | ", " - ", " -- ", "｜", "：", " :: "]:
         if sep in title:
             title = title.split(sep)[0]
-    return title.strip()[:50]
+    return title.strip()[:50].lower()
 
 
 # =============================================================================
@@ -268,16 +268,16 @@ def calculate_engagement_score(article: dict, social_metrics: dict = None) -> tu
     - Hacker News ポイント
 
     スコア計算:
-    - engagementRate: 5倍して正規化（最大50点）
-    - はてブ: 1ブクマ=2点（最大40点）
-    - HN: 1ポイント=0.5点（最大40点）
+    - engagementRate: 2倍して正規化（最大20点）
+    - はてブ: 1ブクマ=2点（最大50点）
+    - HN: 1ポイント=0.5点（最大50点）
     - 合計を100点満点にクリップ
 
     Returns:
         tuple: (総合スコア, {"feedly": x, "hatena": y, "hn": z})
     """
     rate = article.get("engagement_rate") or article.get("engagementRate") or 0
-    feedly_score = min(rate * 5, 50)
+    feedly_score = min(rate * 2, 20)
 
     # ソーシャルメトリクス
     url = extract_url(article)
@@ -286,8 +286,8 @@ def calculate_engagement_score(article: dict, social_metrics: dict = None) -> tu
     hn_points = metrics.get("hn", 0)
     hn_id = metrics.get("hn_id", "")
 
-    hatena_score = min(hatena_count * 2, 40)  # 20ブクマで40点
-    hn_score = min(hn_points * 0.5, 40)  # 80ポイントで40点
+    hatena_score = min(hatena_count * 2, 50)  # 25ブクマで50点
+    hn_score = min(hn_points * 0.5, 50)  # 100ポイントで50点
 
     total = min(feedly_score + hatena_score + hn_score, 100)
 
@@ -345,23 +345,25 @@ def calculate_relevance_score(
     article: dict,
     keywords: list,
     global_keywords: list = None,
-    synonym_groups: list = None
+    synonym_groups: list = None,
+    trusted_sources: dict = None
 ) -> tuple[float, list]:
     """
     関連度スコアを計算 (0-100) とマッチしたキーワードを返す
 
     タイトルと本文でキーワード（類義語含む）マッチをカウント。
     タイトルマッチは重み2倍。
+    trusted_sourcesに登録されたドメインからの記事はソース名をマッチとして加算。
     1つでもマッチすれば基礎点を付与。
 
     Returns:
         tuple: (スコア, マッチしたキーワードのリスト)
     """
-    if not keywords and not global_keywords:
+    if not keywords and not global_keywords and not trusted_sources:
         return 50, []  # キーワード未設定時はニュートラル
 
     all_keywords = list(set((keywords or []) + (global_keywords or [])))
-    if not all_keywords:
+    if not all_keywords and not trusted_sources:
         return 50, []
 
     # 類義語グループで展開
@@ -435,15 +437,33 @@ def calculate_relevance_score(
             if content_matched_kw not in matched_keywords and content_matched_kw != title_matched_kw:
                 matched_keywords.append(content_matched_kw)
 
-    # スコア計算（改良版）
+    # trusted_sourcesのドメインマッチ（ソース信頼度の代替）
+    trusted_source_match = False
+    if trusted_sources:
+        url = extract_url(article)
+        domain = extract_domain(url)
+        source_title = article.get("source", {}).get("title", "")
+        if not source_title:
+            source_title = article.get("origin", {}).get("title", "")
+
+        for source_name in trusted_sources:
+            if (source_name.lower() in domain) or (source_name.lower() in source_title.lower()):
+                trusted_source_match = True
+                if source_name not in matched_keywords:
+                    matched_keywords.append(f"@{source_name}")
+                break
+
+    # スコア計算
     # - 1つでもマッチすれば基礎点30
     # - マッチ数に応じて加点
-    total_keyword_sets = len(keyword_sets)
+    # - trusted_sourceマッチはタイトルマッチ1回分として加算
+    total_keyword_sets = len(keyword_sets) + (1 if trusted_sources else 0)
     if total_keyword_sets == 0:
         return 50, []
 
-    # タイトルマッチは2倍の重み
-    total_matches = title_matches * 2 + content_matches
+    # タイトルマッチは2倍の重み、trusted_sourceマッチはタイトルマッチ相当
+    trusted_bonus = 2 if trusted_source_match else 0
+    total_matches = title_matches * 2 + content_matches + trusted_bonus
     max_possible = total_keyword_sets * 3
 
     # 基礎点 + マッチ率による加点
@@ -518,16 +538,14 @@ def calculate_total_score(article: dict, config: dict, category_config: dict = N
         dict: 各指標のスコアと総合スコア
     """
     weights = config.get("scoring", {}).get("weights", {
-        "engagement": 0.30,
-        "relevance": 0.40,
-        "freshness": 0.20,
-        "source_trust": 0.10
+        "engagement": 0.60,
+        "relevance": 0.40
     })
 
     # グローバルキーワードを取得（全カテゴリ共通）
     global_keywords = config.get("global_keywords", [])
 
-    # グローバル信頼ソースを取得（全カテゴリ共通）
+    # trusted_sourcesは関連度のキーワードマッチとして使用
     trusted_sources = config.get("trusted_sources", {})
 
     # 類義語グループを取得
@@ -537,26 +555,21 @@ def calculate_total_score(article: dict, config: dict, category_config: dict = N
     engagement, engagement_breakdown = calculate_engagement_score(article, social_metrics)
     relevance, matched_keywords = calculate_relevance_score(
         article,
-        keywords=global_keywords,  # グローバルキーワードを使用
-        synonym_groups=synonym_groups
+        keywords=global_keywords,
+        synonym_groups=synonym_groups,
+        trusted_sources=trusted_sources
     )
-    freshness = calculate_freshness_score(article)
-    source_trust = calculate_source_trust_score(article, trusted_sources)
 
     # 重み付け合計
     total = (
-        engagement * weights.get("engagement", 0.30) +
-        relevance * weights.get("relevance", 0.40) +
-        freshness * weights.get("freshness", 0.20) +
-        source_trust * weights.get("source_trust", 0.10)
+        engagement * weights.get("engagement", 0.60) +
+        relevance * weights.get("relevance", 0.40)
     )
 
     return {
         "engagement": round(engagement, 1),
         "engagement_breakdown": engagement_breakdown,
         "relevance": round(relevance, 1),
-        "freshness": round(freshness, 1),
-        "source_trust": round(source_trust, 1),
         "total": round(total, 1),
         "matched_keywords": matched_keywords
     }
@@ -575,20 +588,49 @@ def categorize_priority(score: float, thresholds: dict) -> str:
 
 
 def deduplicate_articles(articles: list) -> list:
-    """タイトルの正規化で重複を除去（高スコアを優先）"""
-    seen = {}
+    """タイトルの正規化とURL一致で重複を除去（高スコアを優先）"""
+    seen_titles = {}
+    seen_urls = {}
+
+    def _better_score(new_article, existing_article):
+        return new_article.get("_scores", {}).get("total", 0) > existing_article.get("_scores", {}).get("total", 0)
+
     for article in articles:
         title = article.get("title", "No Title")
         norm_title = normalize_title(title)
+        url = extract_url(article)
 
-        if norm_title in seen:
-            # より高いスコアの方を採用
-            if article.get("_scores", {}).get("total", 0) > seen[norm_title].get("_scores", {}).get("total", 0):
-                seen[norm_title] = article
-        else:
-            seen[norm_title] = article
+        # URL一致による重複チェック（優先）
+        if url and url in seen_urls:
+            if _better_score(article, seen_urls[url]):
+                # 古い方をtitleからも除去
+                old = seen_urls[url]
+                old_norm = normalize_title(old.get("title", "No Title"))
+                if old_norm in seen_titles and seen_titles[old_norm] is old:
+                    seen_titles[old_norm] = article
+                seen_urls[url] = article
+            continue
 
-    return list(seen.values())
+        # タイトル一致による重複チェック
+        if norm_title in seen_titles:
+            if _better_score(article, seen_titles[norm_title]):
+                # 古い方をurlsからも除去
+                old = seen_titles[norm_title]
+                old_url = extract_url(old)
+                if old_url and old_url in seen_urls and seen_urls[old_url] is old:
+                    del seen_urls[old_url]
+                seen_titles[norm_title] = article
+                if url:
+                    seen_urls[url] = article
+            continue
+
+        seen_titles[norm_title] = article
+        if url:
+            seen_urls[url] = article
+
+    # seen_titlesの値をユニークにして返す
+    result = list({id(a): a for a in seen_titles.values()}.values())
+    return result
 
 
 def generate_markdown_report(articles: list, config: dict, output_path: str):
@@ -625,7 +667,7 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
     lines.append("### 総合スコア")
     lines.append("")
     lines.append("```")
-    lines.append("総合スコア = 注目度×30% + 関連度×40% + 鮮度×20% + 信頼度×10%")
+    lines.append("総合スコア = 注目度×60% + 関連度×40%")
     lines.append("```")
     lines.append("")
     lines.append(f"**ライン引き**: MUST READ≧{thresholds['must_read']} / SHOULD READ≧{thresholds['should_read']} / OPTIONAL≧{thresholds['optional']}")
@@ -634,9 +676,9 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
     lines.append("")
     lines.append("| 指標 | 計算式 | 上限 |")
     lines.append("|------|--------|------|")
-    lines.append("| Feedly | engagementRate × 5 | 50点 |")
-    lines.append("| はてブ | ブックマーク数 × 2 | 40点 |")
-    lines.append("| HN | points × 0.5 | 40点 |")
+    lines.append("| Feedly | engagementRate × 2 | 20点 |")
+    lines.append("| はてブ | ブックマーク数 × 2 | 50点 |")
+    lines.append("| HN | points × 0.5 | 50点 |")
     lines.append("")
     lines.append("```")
     lines.append("注目度 = min(Feedly + はてブ + HN, 100)")
@@ -645,22 +687,9 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
     lines.append("### 関連度 (0-100)")
     lines.append("")
     lines.append("- キーワードマッチで計算（タイトルマッチは2倍の重み）")
+    lines.append("- trusted_sourcesに登録されたソースからの記事はタイトルマッチ相当で加算")
     lines.append("- 1つ以上マッチ: 基礎点30 + マッチ率に応じて最大70点追加")
     lines.append("- マッチなし: 0点")
-    lines.append("")
-    lines.append("### 鮮度 (0-100)")
-    lines.append("")
-    lines.append("| 経過時間 | スコア |")
-    lines.append("|----------|--------|")
-    lines.append("| 24時間以内 | 100 |")
-    lines.append("| 48時間以内 | 50 |")
-    lines.append("| 72時間以内 | 35 |")
-    lines.append("| それ以上 | 25 |")
-    lines.append("")
-    lines.append("### 信頼度 (0-100)")
-    lines.append("")
-    lines.append("- 設定ファイルで定義されたソース: 定義値 × 100")
-    lines.append("- 未定義のソース: 50")
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -675,8 +704,8 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
 
         lines.append(f"## {priority} ({len(group)}件)")
         lines.append("")
-        lines.append("| # | 記事 | スコア | 注目 | Feedly | はてブ | HN | 関連 | 鮮度 | マッチKW | 読了 | 保存 |")
-        lines.append("|---|------|--------|------|--------|--------|-----|------|------|----------|------|------|")
+        lines.append("| # | 記事 | スコア | 注目 | Feedly | はてブ | HN | 関連 | マッチKW | 読了 | 保存 |")
+        lines.append("|---|------|--------|------|--------|--------|-----|------|----------|------|------|")
 
         for i, article in enumerate(group, 1):
             title = article.get("title", "No Title")[:50].replace("|", "｜")
@@ -709,13 +738,13 @@ def generate_markdown_report(articles: list, config: dict, output_path: str):
                 lines.append(
                     f"| {i} | [{title}]({url}) | **{scores.get('total', 0)}** | "
                     f"{scores.get('engagement', 0)} | {feedly} | {hatena_display} | {hn_display} | {scores.get('relevance', 0)} | "
-                    f"{scores.get('freshness', 0)} | {matched_kw} | [ ] | [ ] |"
+                    f"{matched_kw} | [ ] | [ ] |"
                 )
             else:
                 lines.append(
                     f"| {i} | {title} | **{scores.get('total', 0)}** | "
                     f"{scores.get('engagement', 0)} | {feedly} | {hatena_display} | {hn_display} | {scores.get('relevance', 0)} | "
-                    f"{scores.get('freshness', 0)} | {matched_kw} | [ ] | [ ] |"
+                    f"{matched_kw} | [ ] | [ ] |"
                 )
 
         lines.append("")
